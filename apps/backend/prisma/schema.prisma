@@ -1,0 +1,323 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CONFIRMED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  RESCHEDULED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  POSTED
+  PAID
+  PARTIALLY_PAID
+  CANCELLED
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  branches  Branch[]
+}
+
+model Branch {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  code           String   @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  users         User[]
+  patients      Patient[]
+  appointments  Appointment[]
+  invoices      Invoice[]
+  journalEntries JournalEntry[]
+
+  @@index([organizationId])
+}
+
+model User {
+  id             String   @id @default(uuid())
+  organizationId String
+  branchId       String
+  email          String   @unique
+  fullName       String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  branch    Branch     @relation(fields: [branchId], references: [id])
+  roles     UserRole[]
+  auditLogs AuditLog[] @relation("AuditActor")
+
+  @@index([organizationId, branchId])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  description String?
+  roles       RolePermission[]
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+}
+
+model RolePermission {
+  id           String @id @default(uuid())
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+}
+
+model Patient {
+  id             String   @id @default(uuid())
+  organizationId String
+  branchId       String
+  mrn            String
+  firstName      String
+  lastName       String
+  dob            DateTime
+  gender         String
+  phone          String
+  email          String?
+  isDeleted      Boolean  @default(false)
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  branch       Branch         @relation(fields: [branchId], references: [id])
+  appointments Appointment[]
+  invoices     Invoice[]
+
+  @@unique([organizationId, mrn])
+  @@index([organizationId, branchId, lastName])
+}
+
+model Appointment {
+  id             String            @id @default(uuid())
+  organizationId String
+  branchId       String
+  patientId      String
+  providerId     String?
+  startsAt       DateTime
+  endsAt         DateTime
+  status         AppointmentStatus @default(BOOKED)
+  reason         String?
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  patient Patient  @relation(fields: [patientId], references: [id])
+  branch  Branch   @relation(fields: [branchId], references: [id])
+  invoices Invoice[]
+
+  @@index([organizationId, branchId, status, startsAt])
+  @@index([patientId, startsAt])
+}
+
+model Invoice {
+  id             String        @id @default(uuid())
+  organizationId String
+  branchId       String
+  appointmentId  String?
+  patientId      String
+  invoiceNo      String
+  status         InvoiceStatus @default(DRAFT)
+  subtotal       Decimal       @db.Decimal(18, 2)
+  taxAmount      Decimal       @db.Decimal(18, 2)
+  discountAmount Decimal       @db.Decimal(18, 2)
+  totalAmount    Decimal       @db.Decimal(18, 2)
+  currency       String        @default("USD")
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  appointment Appointment? @relation(fields: [appointmentId], references: [id])
+  patient     Patient      @relation(fields: [patientId], references: [id])
+  branch      Branch       @relation(fields: [branchId], references: [id])
+  lines       InvoiceLine[]
+  payments    Payment[]
+
+  @@unique([organizationId, invoiceNo])
+  @@index([organizationId, branchId, status, createdAt])
+}
+
+model InvoiceLine {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  itemCode    String
+  description String
+  qty         Decimal  @db.Decimal(18, 2)
+  unitPrice   Decimal  @db.Decimal(18, 2)
+  lineTotal   Decimal  @db.Decimal(18, 2)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id             String   @id @default(uuid())
+  organizationId String
+  branchId       String
+  invoiceId      String
+  amount         Decimal  @db.Decimal(18, 2)
+  method         String
+  referenceNo    String?
+  receivedAt     DateTime
+  createdBy      String?
+  createdAt      DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([organizationId, branchId, receivedAt])
+  @@index([invoiceId])
+}
+
+model Account {
+  id             String  @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  type           String
+  isActive       Boolean @default(true)
+
+  @@unique([organizationId, code])
+}
+
+model JournalEntry {
+  id             String             @id @default(uuid())
+  organizationId String
+  branchId       String
+  entryNo        String
+  status         JournalEntryStatus @default(DRAFT)
+  entryDate      DateTime
+  memo           String?
+  sourceType     String?
+  sourceId       String?
+  createdBy      String?
+  postedAt       DateTime?
+  createdAt      DateTime           @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id])
+  items  JournalItem[]
+
+  @@unique([organizationId, entryNo])
+  @@index([organizationId, branchId, entryDate])
+}
+
+model JournalItem {
+  id             String  @id @default(uuid())
+  journalEntryId String
+  accountId      String
+  debit          Decimal @db.Decimal(18, 2) @default(0)
+  credit         Decimal @db.Decimal(18, 2) @default(0)
+  memo           String?
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  branchId       String
+  actorUserId    String?
+  action         String
+  entityType     String
+  entityId       String
+  beforeJson     Json?
+  afterJson      Json?
+  traceId        String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([organizationId, branchId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model IdempotencyLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  branchId       String
+  key            String
+  operation      String
+  requestHash    String
+  responseJson   Json?
+  statusCode     Int?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@unique([organizationId, branchId, key, operation])
+}
+
+model OutboxEvent {
+  id             String   @id @default(uuid())
+  organizationId String
+  branchId       String
+  aggregateType  String
+  aggregateId    String
+  eventName      String
+  eventVersion   String
+  payload        Json
+  status         String   @default("PENDING")
+  retryCount     Int      @default(0)
+  nextRetryAt    DateTime?
+  createdAt      DateTime @default(now())
+  sentAt         DateTime?
+
+  @@index([status, nextRetryAt])
+  @@index([aggregateType, aggregateId])
+}
